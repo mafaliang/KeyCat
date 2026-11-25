@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "KeyCat",
+  "mainBinaryName": "KeyCat",
+  "version": "./package.json",
+  "identifier": "com.ellobok.keycat",
+  "build": {
+    "frontendDist": "../web"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "copyright": "Copyright © ElloboDK",
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["SimpChinese"],
+        "installerHooks": "./installer-hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJERjI2OTA3Q0I4N0Q5RTQKUldUazJZZkxCMm55dlVUSHBheUI1ZHF3d3BnMmF0dnlWRmhZbERxdDdvRUVzU1VqUnArTVMvUnQK",
+      "endpoints": ["https://github.com/ElloboDK/KeyCat/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

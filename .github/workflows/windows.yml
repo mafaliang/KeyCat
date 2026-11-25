@@ -1,0 +1,132 @@
+name: Windows
+
+# Builds the Tauri shell in win/ on a real Windows runner. Tag pushes also publish the installer
+# plus latest.json, which is what the app's updater reads, and latest.yml, which moves 1.0.x
+# installs (Electron, electron-updater) over to this build.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# Read-only by default: the build runs npm and cargo dependencies, so only the release job,
+# which runs nothing but gh, may write to the repository.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: win
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: win/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: win
+
+      - name: Check that the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match win/package.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The updater key only exists as a repository secret; without it (pull requests from
+      # forks) the installer is built unsigned, which is fine for checking that it builds.
+      - name: Build installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            npm run dist
+          else
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "TAURI_SIGNING_PRIVATE_KEY is required to publish a release" >&2
+              exit 1
+            fi
+            npm run dist -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          fi
+
+      - name: Collect release files
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          mkdir -p out
+          cp target/release/bundle/nsis/KeyCat_"$version"_x64-setup.exe out/KeyCat-Windows-Setup.exe
+          ls -l out
+          [ -f target/release/bundle/nsis/KeyCat_"$version"_x64-setup.exe.sig ] || exit 0
+          url="https://github.com/ElloboDK/KeyCat/releases/download/v$version/KeyCat-Windows-Setup.exe"
+          date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          VERSION="$version" URL="$url" DATE="$date" \
+          SIG="$(cat target/release/bundle/nsis/KeyCat_"$version"_x64-setup.exe.sig)" \
+          node -e '
+            const fs = require("fs");
+            const { VERSION, URL, DATE, SIG } = process.env;
+            fs.writeFileSync("out/latest.json", JSON.stringify({
+              version: VERSION,
+              pub_date: DATE,
+              platforms: { "windows-x86_64": { signature: SIG, url: URL } },
+            }, null, 2));
+            const exe = fs.readFileSync("out/KeyCat-Windows-Setup.exe");
+            const sha512 = require("crypto").createHash("sha512").update(exe).digest("base64");
+            fs.writeFileSync("out/latest.yml", [
+              `version: ${VERSION}`,
+              "files:",
+              "  - url: KeyCat-Windows-Setup.exe",
+              `    sha512: ${sha512}`,
+              `    size: ${exe.length}`,
+              "path: KeyCat-Windows-Setup.exe",
+              `sha512: ${sha512}`,
+              `releaseDate: '\''${DATE}'\''`,
+              "",
+            ].join("\n"));
+          '
+          cat out/latest.json out/latest.yml
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: keycat-windows
+          path: win/out/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: keycat-windows
+          path: out
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l out
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" out/KeyCat-Windows-Setup.exe out/latest.json out/latest.yml --clobber

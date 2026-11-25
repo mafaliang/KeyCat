@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg: #f7f2e4; --card: #fffdf7; --text: #2a2722; --muted: #8a8274; --line: #e6dfcd; --accent: #e08a3c; --bar: #e9a35c; --bar-today: #d9762a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #23211d; --card: #2d2a25; --text: #eee8da; --muted: #a59d8d; --line: #3d3932; --accent: #f0a35a; --bar: #b9773b; --bar-today: #f0a35a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 18px 20px 20px; background: var(--bg); color: var(--text);
+    font: 13px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; -webkit-user-select: none; user-select: none; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .top { display: flex; align-items: center; gap: 12px; }
+  .top img { width: 92px; height: 94px; object-fit: contain; flex: 0 0 auto; }
+  .top .placeholder { width: 92px; height: 94px; flex: 0 0 auto; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .date { color: var(--muted); font-size: 12px; }
+  .hero { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 8px; }
+  .hero small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 4px; }
+  .fish { margin-top: 2px; font-size: 15px; letter-spacing: 1px; min-height: 18px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+  .stat .v { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stat .k { color: var(--muted); font-size: 12px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--muted); }
+  .bond { display: flex; justify-content: space-between; align-items: baseline; }
+  .bond b { font-size: 16px; }
+  .meter { height: 6px; border-radius: 3px; background: var(--line); margin: 8px 0 6px; overflow: hidden; }
+  .meter div { height: 100%; background: var(--accent); border-radius: 3px; }
+  .chart { position: relative; display: flex; align-items: flex-end; gap: 8px; height: 110px; padding-top: 4px;
+    border-bottom: 1px solid var(--line); }
+  .col { flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; cursor: default; }
+  .col span { display: block; width: 60%; min-height: 2px; background: var(--bar); border-radius: 4px 4px 0 0; }
+  .col.today span { background: var(--bar-today); }
+  .col:hover span { filter: brightness(1.08); }
+  .days { display: flex; gap: 8px; margin-top: 5px; }
+  .days div { flex: 1; text-align: center; color: var(--muted); font-size: 11px; }
+  .days div.today { color: var(--text); font-weight: 600; }
+  .tip { position: absolute; pointer-events: none; background: var(--text); color: var(--card); font-size: 12px;
+    padding: 4px 8px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, -100%); display: none; }
+  .bar { display: flex; gap: 8px; }
+  button { flex: 1; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--card);
+    color: var(--text); font: inherit; cursor: pointer; }
+  button:active { background: var(--line); }
+  #saved { text-align: center; margin-top: 8px; min-height: 16px; }
+</style>
+</head>
+<body>
+<div class="card top">
+  <div class="placeholder" id="portrait"></div>
+  <div>
+    <h1>今天的小猫</h1>
+    <div class="date" id="date"></div>
+    <div class="hero" id="fishCount">0<small>条小鱼干</small></div>
+    <div class="fish" id="fish"></div>
+    <div class="hint">每按 300 下键盘，它就吃掉一条</div>
+  </div>
+</div>
+<div class="card grid" id="grid"></div>
+<div class="card">
+  <div class="bond"><span>你们的关系：<b id="level"></b></span><span class="hint" id="days"></span></div>
+  <div class="meter"><div id="meter"></div></div>
+  <div class="hint" id="next"></div>
+</div>
+<div class="card">
+  <h2>这一周的按键次数</h2>
+  <div class="chart" id="chart"><div class="tip" id="tip"></div></div>
+  <div class="days" id="dayNames"></div>
+</div>
+<div class="bar">
+  <button id="save">保存成图片</button>
+  <button id="refresh">刷新</button>
+</div>
+<div class="hint" id="saved"></div>
+<script>
+'use strict';
+const send = msg => window.webkit?.messageHandlers?.stats?.postMessage(msg);
+const FISH_PER = 300;
+const LEVELS = [[0, '刚认识'], [15, '混熟了'], [50, '亲近'], [120, '黏你'], [300, '家人']];
+const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+const pad = n => String(n).padStart(2, '0');
+const dayKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+let data = null, portrait = null;
+
+function summary(mem) {
+  const today = new Date();
+  const d = (mem.days || {})[dayKey(today)] || {};
+  const n = k => Math.round(d[k] || 0);
+  let i = 0;
+  while (i + 1 < LEVELS.length && mem.bond >= LEVELS[i + 1][0]) i++;
+  const next = LEVELS[i + 1];
+  const [y, m, dd] = (mem.firstMet || dayKey(today)).split('-').map(Number);
+  const week = [];
+  for (let k = 6; k >= 0; k--) {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - k);
+    week.push({ name: k === 0 ? '今天' : '周' + WEEK[day.getDay()], keys: Math.round(((mem.days || {})[dayKey(day)] || {}).keys || 0), today: k === 0 });
+  }
+  return {
+    date: `${today.getMonth() + 1} 月 ${today.getDate()} 日 星期${WEEK[today.getDay()]}`,
+    fish: Math.floor(n('keys') / FISH_PER),
+    stats: [
+      ['按键', n('keys'), '下'], ['被摸', n('pets'), '次'], ['打盹', Math.round(n('napSec') / 60), '分钟'],
+      ['推掉杯子', n('pushes'), '个'], ['起身休息', n('breaks'), '次'],
+      ['番茄钟', n('focus'), '个'], ['互相慢眨眼', n('blinks'), '次'],
+    ],
+    level: LEVELS[i][1],
+    progress: next ? (mem.bond - LEVELS[i][0]) / (next[0] - LEVELS[i][0]) : 1,
+    next: next ? `再亲近一些就是「${next[1]}」：多摸摸它，对它慢眨眼` : '已经是一家人了',
+    together: Math.max(1, Math.floor((today - new Date(y, m - 1, dd)) / 86400000) + 1),
+    week,
+  };
+}
+
+function render() {
+  if (!data) return;
+  const s = summary(data);
+  document.getElementById('date').textContent = s.date;
+  document.getElementById('fishCount').firstChild.textContent = s.fish;
+  document.getElementById('fish').textContent = '🐟'.repeat(Math.min(s.fish, 10)) + (s.fish > 10 ? ' …' : '');
+  document.getElementById('grid').innerHTML = s.stats.map(([k, v, u]) =>
+    `<div class="stat"><div class="v">${v.toLocaleString()} <span class="hint">${u}</span></div><div class="k">${k}</div></div>`).join('');
+  document.getElementById('level').textContent = s.level;
+  document.getElementById('days').textContent = `认识第 ${s.together} 天`;
+  document.getElementById('meter').style.width = Math.round(s.progress * 100) + '%';
+  document.getElementById('next').textContent = s.next;
+  const chart = document.getElementById('chart'), tip = document.getElementById('tip');
+  const max = Math.max(1, ...s.week.map(w => w.keys));
+  chart.querySelectorAll('.col').forEach(c => c.remove());
+  for (const w of s.week) {
+    const col = document.createElement('div');
+    col.className = 'col' + (w.today ? ' today' : '');
+    const bar = document.createElement('span');
+    bar.style.height = (w.keys / max * 100) + '%';
+    col.append(bar);
+    // The hit area is the whole column, wider and taller than the bar itself.
+    col.addEventListener('mouseenter', () => {
+      tip.textContent = `${w.name}：${w.keys.toLocaleString()} 下`;
+      tip.style.display = 'block';
+      // Centred over the bar, but kept inside the chart at either end.
+      const half = tip.offsetWidth / 2;
+      tip.style.left = Math.min(chart.clientWidth - half, Math.max(half, col.offsetLeft + col.offsetWidth / 2)) + 'px';
+      tip.style.top = (col.offsetTop + col.offsetHeight - bar.offsetHeight - 6) + 'px';
+    });
+    col.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    chart.append(col);
+  }
+  document.getElementById('dayNames').innerHTML = s.week.map(w => `<div class="${w.today ? 'today' : ''}">${w.name}</div>`).join('');
+}
+
+// Called by the app: the cat's memory, then a picture of the cat as it is right now.
+window.initStats = mem => { data = mem; render(); };
+window.showPortrait = url => {
+  portrait = new Image();
+  portrait.src = url;
+  portrait.id = 'portrait';
+  document.getElementById('portrait').replaceWith(portrait);
+};
+
+// The card as a 2x picture for sharing, drawn on a canvas rather than captured from the page.
+function drawCard() {
+  const s = summary(data);
+  const W = 360, H = 520, c = document.createElement('canvas');
+  c.width = W * 2; c.height = H * 2;
+  const g = c.getContext('2d');
+  g.scale(2, 2);
+  const font = (w, px) => `${w} ${px}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
+  g.fillStyle = '#f7f2e4'; g.fillRect(0, 0, W, H);
+  const box = (x, y, w, h) => {
+    g.fillStyle = '#fffdf7'; g.strokeStyle = '#e6dfcd'; g.lineWidth = 1;
+    g.beginPath(); g.roundRect(x, y, w, h, 12); g.fill(); g.stroke();
+  };
+  box(14, 14, W - 28, 132);
+  if (portrait && portrait.complete) g.drawImage(portrait, 22, 22, 112, 114);
+  g.fillStyle = '#2a2722'; g.font = font(600, 15); g.fillText('今天的小猫', 146, 44);
+  g.fillStyle = '#8a8274'; g.font = font(400, 12); g.fillText(s.date, 146, 63);
+  g.fillStyle = '#2a2722'; g.font = font(700, 32); g.fillText(String(s.fish), 146, 102);
+  const fw = g.measureText(String(s.fish)).width;
+  g.fillStyle = '#8a8274'; g.font = font(500, 13); g.fillText('条小鱼干', 152 + fw, 102);
+  g.font = font(400, 14); g.fillText('🐟'.repeat(Math.min(s.fish, 8)), 146, 126);
+  box(14, 156, W - 28, 176);
+  s.stats.forEach(([k, v, u], i) => {
+    const x = 30 + (i % 2) * 160, y = 186 + Math.floor(i / 2) * 40;
+    g.fillStyle = '#2a2722'; g.font = font(650, 18); g.fillText(v.toLocaleString(), x, y);
+    const vw = g.measureText(v.toLocaleString()).width;
+    g.fillStyle = '#8a8274'; g.font = font(400, 12); g.fillText(u, x + vw + 4, y); g.fillText(k, x, y + 16);
+  });
+  box(14, 342, W - 28, 140);
+  g.fillStyle = '#8a8274'; g.font = font(600, 12); g.fillText('这一周的按键次数', 30, 364);
+  const max = Math.max(1, ...s.week.map(w => w.keys)), bw = 22, gap = (W - 60 - 7 * bw) / 6;
+  s.week.forEach((w, i) => {
+    const x = 30 + i * (bw + gap), h = Math.max(2, w.keys / max * 74);
+    g.fillStyle = w.today ? '#d9762a' : '#e9a35c';
+    g.beginPath(); g.roundRect(x, 452 - h, bw, h, [4, 4, 0, 0]); g.fill();
+    g.fillStyle = w.today ? '#2a2722' : '#8a8274'; g.font = font(w.today ? 600 : 400, 11);
+    g.textAlign = 'center'; g.fillText(w.name, x + bw / 2, 470); g.textAlign = 'left';
+  });
+  g.fillStyle = '#e6dfcd'; g.fillRect(30, 452, W - 60, 1);
+  g.fillStyle = '#8a8274'; g.font = font(400, 12);
+  g.fillText(`和 KeyCat 认识第 ${s.together} 天 · ${s.level}`, 20, 504);
+  return c;
+}
+
+document.getElementById('save').addEventListener('click', () => {
+  if (!data) return;
+  const url = drawCard().toDataURL('image/png');
+  const d = new Date(), name = `KeyCat-小结-${dayKey(d)}.png`;
+  if (window.webkit?.messageHandlers?.stats) {
+    send({ save: { name, base64: url.split(',')[1] } });
+    document.getElementById('saved').textContent = '已保存到「图片/KeyCat」文件夹';
+  } else {
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  }
+});
+document.getElementById('refresh').addEventListener('click', () => send({ refresh: true }));
+
+// Opened straight in a browser, `?demo` fills in a week of made-up numbers to look at.
+if (new URLSearchParams(location.search).has('demo')) {
+  const days = {}, t = new Date();
+  for (let k = 0; k < 7; k++) {
+    const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() - k);
+    days[dayKey(d)] = { keys: 1200 + Math.round(Math.random() * 4000), pets: 14, petSec: 80, napSec: 2400, pushes: 1, breaks: 2, focus: 4, blinks: 5 };
+  }
+  initStats({ firstMet: '2026-09-01', bond: 70, days });
+}
+</script>
+</body>
+</html>

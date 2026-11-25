@@ -1,0 +1,21 @@
+# Build output and release artifacts
+build/
+dist/
+
+# Local code-signing identity: private key plus its password. Never commit.
+signing/
+
+# Screenshots and reference material from the paid app this is modelled on
+snaps/
+ref/
+
+.DS_Store
+
+# Windows build (Tauri)
+win/node_modules/
+win/target/
+win/gen/
+win/out/
+
+# Local project notes (docs/project/), not part of the repo
+docs/project/

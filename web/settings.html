@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg: #f7f2e4; --card: #fffdf7; --text: #2a2722; --muted: #8a8274; --line: #e6dfcd; --accent: #e08a3c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #23211d; --card: #2d2a25; --text: #eee8da; --muted: #a59d8d; --line: #3d3932; --accent: #f0a35a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 18px 20px 20px; background: var(--bg); color: var(--text);
+    font: 13px -apple-system, "PingFang SC", sans-serif; -webkit-user-select: none; }
+  h2 { font-size: 13px; font-weight: 600; margin: 18px 4px 8px; color: var(--muted); }
+  h2:first-of-type { margin-top: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; }
+  .row { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .value { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; min-width: 64px; text-align: right; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  input[type=range] { -webkit-appearance: none; width: 100%; height: 4px; margin: 14px 0 6px; border-radius: 2px;
+    background: var(--line); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--accent); cursor: pointer; }
+  input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .row.off { opacity: 0.45; }
+  .bar { display: flex; gap: 8px; margin-top: 16px; }
+  button { flex: 1; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--card);
+    color: var(--text); font: inherit; cursor: pointer; }
+  button:active { background: var(--line); }
+  button.reset { flex: 0 0 auto; color: var(--muted); }
+  .bar.tests { flex-wrap: wrap; }
+  .bar.tests button { flex: 1 0 28%; }
+  .presets { display: flex; gap: 6px; padding: 10px 0 4px; }
+  .presets button { flex: 1; padding: 6px 4px; }
+  .presets button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  #presetHint { min-height: 16px; padding-bottom: 8px; }
+</style>
+</head>
+<body>
+<h2>性格</h2>
+<div class="card">
+  <div class="presets" id="presets"></div>
+  <div class="hint" id="presetHint"></div>
+</div>
+<div id="form"></div>
+<h2>试试看</h2>
+<div class="bar tests">
+  <button data-test="annoy">生气</button>
+  <button data-test="curious">好奇</button>
+  <button data-test="push">推杯子</button>
+  <button data-test="board">霸占键盘</button>
+  <button data-test="yawn">打哈欠</button>
+  <button data-test="knead">呼噜踩奶</button>
+  <button data-test="nag">提醒休息</button>
+</div>
+<div class="bar">
+  <button class="reset" id="reset">全部恢复默认</button>
+</div>
+<script src="tuning.js"></script>
+<script>
+'use strict';
+const send = msg => window.webkit?.messageHandlers?.settings?.postMessage(msg);
+const values = { ...TUNING };
+const inputs = {};
+const fmt = (it, v) => it.fmt ? it.fmt(v) : (it.step < 1 ? Number(v).toFixed(1) : String(v)) + ' ' + it.unit;
+
+function render() {
+  const form = document.getElementById('form');
+  for (const g of TUNING_SCHEMA) {
+    const h = document.createElement('h2');
+    h.textContent = g.group;
+    const card = document.createElement('div');
+    card.className = 'card';
+    for (const it of g.items) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.group = g.group;
+      const head = document.createElement('div');
+      head.className = 'head';
+      const label = document.createElement('label');
+      label.textContent = it.label;
+      head.append(label);
+      let input;
+      if (it.type === 'toggle') {
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.addEventListener('change', () => set(it, input.checked));
+        head.append(input);
+        row.append(head);
+      } else {
+        const value = document.createElement('span');
+        value.className = 'value';
+        head.append(value);
+        input = document.createElement('input');
+        input.type = 'range';
+        Object.assign(input, { min: it.min, max: it.max, step: it.step });
+        input.addEventListener('input', () => set(it, Number(input.value)));
+        input.show = v => { value.textContent = fmt(it, v); };
+        row.append(head, input);
+      }
+      if (it.hint) {
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.textContent = it.hint;
+        row.append(hint);
+      }
+      inputs[it.key] = { it, input, row };
+      card.append(row);
+    }
+    form.append(h, card);
+  }
+}
+
+function show() {
+  for (const { it, input } of Object.values(inputs)) {
+    if (it.type === 'toggle') input.checked = values[it.key];
+    else { input.value = values[it.key]; input.show(values[it.key]); }
+  }
+  // A switched-off group greys out its sliders.
+  for (const g of TUNING_SCHEMA.filter(g => g.switch)) {
+    for (const { it, row } of Object.values(inputs)) {
+      if (row.dataset.group === g.group && it.key !== g.switch) row.classList.toggle('off', !values[g.switch]);
+    }
+  }
+  // Late night greys out with its own toggle.
+  inputs.nightAt.row.classList.toggle('off', !values.nightOn);
+  // The personality whose values match exactly lights up.
+  const current = TUNING_PRESETS.find(p => Object.keys(TUNING).every(k => values[k] === (k in p.values ? p.values[k] : TUNING[k])));
+  for (const b of presetButtons) b.classList.toggle('on', b.preset === current);
+  document.getElementById('presetHint').textContent = current ? current.hint || '每项都是默认值。' : '已按你的喜好调过。';
+}
+
+// Picking a personality replaces every value: its own, and the defaults for the rest.
+const presetButtons = TUNING_PRESETS.map(p => {
+  const b = document.createElement('button');
+  b.textContent = p.name;
+  b.preset = p;
+  b.addEventListener('click', () => {
+    Object.assign(values, TUNING, p.values);
+    show();
+    // One message, so the app replaces the saved values in one go.
+    send({ preset: p.values });
+  });
+  document.getElementById('presets').append(b);
+  return b;
+});
+
+function set(it, v) {
+  values[it.key] = v;
+  show();
+  send({ tune: { [it.key]: v } });
+}
+
+// Called by the app with the values that differ from the defaults.
+window.initTune = saved => { Object.assign(values, TUNING, saved); show(); };
+
+render();
+show();
+document.getElementById('reset').addEventListener('click', () => {
+  Object.assign(values, TUNING);
+  show();
+  send({ reset: true });
+});
+for (const b of document.querySelectorAll('[data-test]')) b.addEventListener('click', () => send({ test: b.dataset.test }));
+</script>
+</body>
+</html>
